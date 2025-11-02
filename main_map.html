@@ -105,7 +105,7 @@
 /* ---------- Leaflet map setup ---------- */
 console.log('Initializing Leaflet...');
 let map = L.map('map', {preferCanvas:true}).setView([37.5665,126.9780], 13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
 console.log('Map created:', map ? 'OK' : 'FAILED');
 
 setTimeout(()=>{map.invalidateSize();console.log('invalidateSize() called after init');},300);
