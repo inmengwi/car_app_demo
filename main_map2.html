@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>차량용 땅따먹기 - 지도 오버레이 (디버그+드라이빙)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+ integrity="sha256-sA+e2hZgq3h3u3b5k0K+v/2g8m3Zr3j4lX0hWZr3qPk=" crossorigin="anonymous"/>
+<style>
+  :root{--accent:#1f6feb;--muted:#6b7280;--card:#fff;font-family:Inter,"Noto Sans KR",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial;}
+  html,body{height:100%;margin:0;background:#f6f8fb;color:#0f172a;}
+  .shell{max-width:1280px;margin:8px auto;background:var(--card);border-radius:12px;padding:12px;box-shadow:0 8px 30px rgba(10,20,40,0.06);box-sizing:border-box;}
+  header{display:flex;align-items:center;gap:12px;padding:4px 8px 12px 8px}
+  header h1{font-size:18px;margin:0}
+  .layout{display:flex;gap:12px}
+  .sidebar{width:320px;min-width:220px;padding:8px;box-sizing:border-box}
+  .map-area{flex:1; height:62vh; min-height:320px; position:relative}
+  #map{height:100%; width:100%; border-radius:10px; border:1px solid rgba(10,20,40,0.08); box-sizing:border-box}
+  .panel{background:var(--card); padding:10px; border-radius:8px; box-shadow:0 2px 8px rgba(10,20,40,0.03); margin-bottom:10px; border:1px solid rgba(10,20,40,0.06)}
+  .small{font-size:13px;color:var(--muted)}
+  .btn{display:inline-block;padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;margin-top:8px}
+  .stats-row{display:flex;gap:8px;flex-wrap:wrap}
+  .stat-b{background:#f3f8ff;padding:8px;border-radius:8px;font-weight:700;color:#06325b;min-width:110px;text-align:center}
+  label{font-size:13px;color:var(--muted)}
+  input[type=range], input[type=number]{width:100%}
+
+  @media (max-width:900px){.layout{flex-direction:column}.sidebar{order:2;width:100%}.map-area{order:1;height:58vh}}
+  @media (max-width:420px){header h1{font-size:15px}.sidebar{padding:6px}.btn{padding:7px 8px;font-size:13px}.map-area{height:56vh;min-height:300px}}
+
+  /* debug console styles */
+  #debugContainer .head {display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  #debugConsole {
+    background:#111; color:#0f0; font-family:monospace; font-size:13px;
+    padding:8px; border-radius:8px; height:200px; overflow-y:auto; border:1px solid #333;
+  }
+  .log-entry {margin-bottom:2px; white-space:pre-wrap; word-break:break-word;}
+  .log-entry.warn {color:#ff0;}
+  .log-entry.error {color:#f55;}
+  #clearLogs {background:#444; border:none; color:#fff; padding:5px 10px; border-radius:6px; cursor:pointer;}
+</style>
+</head>
+<body>
+  <div class="shell" role="application" aria-label="Map Overlay Demo (Debug)">
+    <header>
+      <div style="width:40px;height:40px;border-radius:8px;background:linear-gradient(180deg,var(--accent),#0b6bd6)"></div>
+      <h1>차량용 땅따먹기 — 지도 오버레이 (디버그 + 드라이빙)</h1>
+      <div style="margin-left:auto" class="small">Leaflet + OSM • Canvas 렌더러</div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="small">시뮬레이션 속도 (km/h)</div>
+          <input id="speedRange" type="range" min="0" max="130" value="40">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <div>속도: <strong id="speedVal">40</strong> km/h</div>
+            <button id="toggleDrive" class="btn">Start Driving</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <label>자동 해제 반경 (m)</label>
+          <input id="radius" type="number" value="90" />
+          <div style="margin-top:10px"></div>
+          <label>타일 크기 (m) — 모바일 권장 100~200</label>
+          <input id="tileSize" type="number" value="140" />
+          <div style="margin-top:10px"></div>
+          <label><input id="useCache" type="checkbox" checked /> LocalStorage 캐시 사용</label>
+        </div>
+
+        <div class="panel">
+          <div class="small">컨트롤</div>
+          <button id="centerBtn" class="btn" style="background:#0b6bd6">현재 위치로 중심</button>
+          <button id="rebuildBtn" class="btn" style="background:#0b6bd6;margin-left:6px">격자 재생성</button>
+          <button id="gpsBtn" class="btn" style="background:#0f766e;margin-left:6px">실제 GPS 사용(허용 필요)</button>
+        </div>
+
+        <div class="panel">
+          <div class="small">통계</div>
+          <div class="stats-row" style="margin-top:8px;">
+            <div class="stat-b">총 타일<div id="totalTiles" style="font-size:16px">0</div></div>
+            <div class="stat-b">해제 타일<div id="exploredTiles" style="font-size:16px">0</div></div>
+            <div class="stat-b">점유율<div id="percent" style="font-size:16px">0%</div></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="map-area">
+        <div id="map" aria-label="Interactive map"></div>
+      </section>
+    </div>
+
+    <div id="debugContainer" class="panel" style="margin-top:10px;">
+      <div class="head">
+        <div class="small">📟 Debug Console (모바일 전용 로그 출력)</div>
+        <div>
+          <button id="clearLogs">Clear</button>
+        </div>
+      </div>
+      <div id="debugConsole"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+   integrity="sha256-o9N1j7w9u2g2mN1g+R9KQq3zJxG6g9oZr3+6m+Xv9xA=" crossorigin="anonymous"></script>
+  <script>
+/* =========================
+   0) 화면 디버그 콘솔 후킹
+========================= */
+(function(){
+  const consoleDiv = document.getElementById('debugConsole');
+  const orig = { log:console.log, warn:console.warn, error:console.error };
+  function toText(arg){
+    if(typeof arg === 'object'){ try{ return JSON.stringify(arg); } catch(e){ return String(arg); } }
+    return String(arg);
+  }
+  function addLog(args, type='log'){
+    const entry=document.createElement('div');
+    entry.className='log-entry '+type;
+    const t=new Date().toLocaleTimeString();
+    entry.textContent=`[${t}] ${args.map(toText).join(' ')}`;
+    consoleDiv.appendChild(entry);
+    consoleDiv.scrollTop=consoleDiv.scrollHeight;
+  }
+  console.log = (...args)=>{ orig.log(...args); addLog(args,'log'); }
+  console.warn = (...args)=>{ orig.warn(...args); addLog(args,'warn'); }
+  console.error = (...args)=>{ orig.error(...args); addLog(args,'error'); }
+  document.getElementById('clearLogs').onclick=()=>{consoleDiv.innerHTML=''; console.log('--- console cleared ---');}
+})();
+
+/* =========================
+   1) 기본 설정 & 지도 생성
+========================= */
+console.log('Initializing Leaflet…');
+const DEFAULT_CENTER = [37.5665,126.9780]; // 서울
+let useRealGPS = false;
+let map = L.map('map', {preferCanvas:true}).setView(DEFAULT_CENTER, 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap contributors'}).addTo(map);
+console.log('Map created:', !!map);
+
+setTimeout(()=>{ try{ map.invalidateSize(); console.log('invalidateSize() after init'); }catch(e){ console.error(e);} }, 300);
+window.addEventListener('resize', ()=> setTimeout(()=>{ map.invalidateSize(); console.log('invalidateSize() on resize'); }, 200));
+window.addEventListener('orientationchange', ()=> setTimeout(()=>{ map.invalidateSize(); console.log('invalidateSize() on orientation'); }, 350));
+
+/* =========================
+   2) 상태/DOM 참조
+========================= */
+let tiles = []; // {id, poly, center, explored}
+let tileLayerGroup = L.layerGroup().addTo(map);
+let driving = false;
+let simLatLng = L.latLng(DEFAULT_CENTER);
+let autoInterval = null;
+
+const speedRange = document.getElementById('speedRange');
+const speedVal = document.getElementById('speedVal');
+const toggleDrive = document.getElementById('toggleDrive');
+const radiusInput = document.getElementById('radius');
+const tileSizeInput = document.getElementById('tileSize');
+const useCache = document.getElementById('useCache');
+const centerBtn = document.getElementById('centerBtn');
+const rebuildBtn = document.getElementById('rebuildBtn');
+const gpsBtn = document.getElementById('gpsBtn');
+const totalTilesEl = document.getElementById('totalTiles');
+const exploredTilesEl = document.getElementById('exploredTiles');
+const percentEl = document.getElementById('percent');
+
+speedVal.textContent = speedRange.value;
+speedRange.addEventListener('input', ()=> speedVal.textContent = speedRange.value);
+
+/* =========================
+   3) 유틸 함수
+========================= */
+function metersToLatLngDelta(meters, atLat){
+  const latDelta = meters / 111320;
+  const lngDelta = meters / (111320 * Math.cos(atLat * Math.PI/180));
+  return {latDelta, lngDelta};
+}
+const canvasRenderer = L.canvas({ padding: 0.5 });
+
+/* =========================
+   4) 격자 생성 / 상태 로드
+========================= */
+function buildGrid(){
+  tileLayerGroup.clearLayers();
+  tiles = [];
+
+  const tileSize = Math.max(40, Number(tileSizeInput.value) || 140); // min guard
+  const bounds = map.getBounds();
+  const north = bounds.getNorth();
+  const south = bounds.getSouth();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  const centerLat = map.getCenter().lat;
+  const d = metersToLatLngDelta(tileSize, centerLat);
+
+  // 안전 캡: 모바일 과부하 방지
+  const approxCols = Math.ceil((east - west) / d.lngDelta);
+  const approxRows = Math.ceil((north - south) / d.latDelta);
+  const approxCount = approxCols * approxRows;
+  const MAX_TILES = 260;
+  const capFactor = approxCount > MAX_TILES ? Math.sqrt(approxCount / MAX_TILES) : 1;
+  console.log('buildGrid()', {tileSize, approxRows, approxCols, approxCount, capFactor});
+
+  let row = 0;
+  for (let lat = south; lat < north; lat += d.latDelta * capFactor){
+    let col = 0;
+    for (let lng = west; lng < east; lng += d.lngDelta * capFactor){
+      const lat1 = lat, lng1 = lng;
+      const lat2 = lat + d.latDelta * capFactor;
+      const lng2 = lng + d.lngDelta * capFactor;
+      const corners = [[lat1,lng1],[lat1,lng2],[lat2,lng2],[lat2,lng1]];
+      const center = L.latLng((lat1+lat2)/2, (lng1+lng2)/2);
+      const id = `r${row}c${col}`;
+
+      const rect = L.polygon(corners, {
+        renderer: canvasRenderer,
+        color: '#1f6feb',
+        weight: 0.6,
+        fillColor: '#ffffff',
+        fillOpacity: 0.32,
+        interactive: true
+      }).addTo(tileLayerGroup);
+
+      rect.on('click', ()=> { exploreTile(id, 'manual-click'); });
+      tiles.push({id, poly:rect, explored:false, center});
+      col++;
+      if (tiles.length > MAX_TILES) break;
+    }
+    row++;
+    if (tiles.length > MAX_TILES) break;
+  }
+
+  totalTilesEl.textContent = tiles.length;
+  updateStats();
+  loadState();
+  setTimeout(()=>{ try{ map.invalidateSize(); }catch(e){} }, 200);
+  console.log('Grid built:', tiles.length, 'tiles');
+}
+
+/* =========================
+   5) 해제/통계/저장
+========================= */
+function exploreTile(id, why='auto'){
+  const t = tiles.find(x=>x.id===id);
+  if(!t || t.explored) return;
+  t.explored = true;
+  try{
+    t.poly.setStyle({fillColor:'#dff4ff', fillOpacity:0.95, color:'#0b6bd6', weight:0.8});
+  }catch(e){}
+  console.log(`[${why}] 해제:`, id);
+  saveState();
+  updateStats();
+}
+
+function autoUncover(){
+  const radius = Number(radiusInput.value) || 90;
+  const candidates = tiles.filter(t=>!t.explored && t.center.distanceTo(simLatLng) <= radius);
+  if(candidates.length===0){ console.log('autoUncover(): no candidates'); return; }
+  const toReveal = Math.min(2, Math.max(1, Math.floor(Math.random()*2)+1));
+  for(let i=0;i<toReveal;i++){
+    const idx = Math.floor(Math.random()*candidates.length);
+    exploreTile(candidates[idx].id, 'auto');
+  }
+}
+
+function updateStats(){
+  const total = tiles.length;
+  const explored = tiles.filter(t=>t.explored).length;
+  totalTilesEl.textContent = total;
+  exploredTilesEl.textContent = explored;
+  percentEl.textContent = total ? (Math.round((explored/total)*100) + '%') : '0%';
+}
+
+function saveState(){
+  if(!useCache.checked) return;
+  try{
+    const state = tiles.map(t => ({id:t.id, explored:t.explored}));
+    localStorage.setItem('car_tiles_state_v1', JSON.stringify(state));
+    console.log('state saved:', state.length);
+  }catch(e){ console.warn('save failed', e); }
+}
+function loadState(){
+  if(!useCache.checked) return;
+  const raw = localStorage.getItem('car_tiles_state_v1');
+  if(!raw){ console.log('no saved state'); return; }
+  try{
+    const state = JSON.parse(raw);
+    let applied = 0;
+    state.forEach(s => {
+      const t = tiles.find(tt=>tt.id===s.id);
+      if(t && s.explored){ t.explored = true; t.poly.setStyle({fillColor:'#dff4ff', fillOpacity:0.95, color:'#0b6bd6', weight:0.8}); applied++; }
+    });
+    updateStats();
+    console.log('state loaded, applied:', applied);
+  }catch(e){ console.warn('load state fail', e); }
+}
+
+/* =========================
+   6) 주행 시뮬레이션 & GPS
+========================= */
+function destinationPoint(latlng, distanceMeters, bearingDeg){
+  const R = 6378137;
+  const δ = distanceMeters / R;
+  const θ = bearingDeg * Math.PI/180;
+  const φ1 = latlng.lat * Math.PI/180;
+  const λ1 = latlng.lng * Math.PI/180;
+
+  const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+  const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
+  const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
+  const φ2 = Math.asin(sinφ2);
+  const y = Math.sin(θ) * sinδ * cosφ1;
+  const x = cosδ - sinφ1 * sinφ2;
+  const λ2 = λ1 + Math.atan2(y, x);
+
+  return L.latLng(φ2 * 180/Math.PI, λ2 * 180/Math.PI);
+}
+
+function startDriving(){
+  if(autoInterval) clearInterval(autoInterval);
+  driving = true;
+  toggleDrive.textContent = 'Stop Driving';
+  toggleDrive.style.background = '#d03030';
+  console.log('Driving started');
+
+  autoInterval = setInterval(()=>{
+    const speed = Number(speedRange.value) || 0; // km/h
+    const mps = speed * 1000 / 3600;             // m/s
+    const tickSec = 1.2;                         // tick interval
+    const moveMeters = mps * tickSec;
+    const bearing = Math.random()*360;
+
+    if(!useRealGPS){
+      simLatLng = destinationPoint(simLatLng, moveMeters, bearing);
+      map.panTo(simLatLng, {animate:false});
+    }
+    if(speed >= 5){ autoUncover(); }
+  }, 1200);
+}
+
+function stopDriving(){
+  driving = false;
+  toggleDrive.textContent = 'Start Driving';
+  toggleDrive.style.background = 'var(--accent)';
+  if(autoInterval) clearInterval(autoInterval);
+  console.log('Driving stopped');
+}
+
+/* 실제 GPS 사용(https + 권한 필요). watchPosition으로 simLatLng 대체 */
+let watchId = null;
+function startGPS(){
+  if(!('geolocation' in navigator)){ console.warn('GPS not supported'); return; }
+  useRealGPS = true;
+  try{
+    watchId = navigator.geolocation.watchPosition(
+      pos=>{
+        const {latitude, longitude, accuracy, speed} = pos.coords;
+        simLatLng = L.latLng(latitude, longitude);
+        map.panTo(simLatLng, {animate:false});
+        console.log('GPS:', {lat:latitude, lng:longitude, acc:accuracy, speed});
+        // 속도가 제공되면(일부 브라우저만) autoUncover 트리거
+        const v = (speed!=null && !isNaN(speed)) ? (speed*3.6) : Number(speedRange.value);
+        if(v >= 5){ autoUncover(); }
+      },
+      err=>{ console.error('GPS error', err.code, err.message); useRealGPS=false; },
+      {enableHighAccuracy:true, maximumAge:1000, timeout:8000}
+    );
+    console.log('GPS watch started');
+  }catch(e){ console.error('GPS start failed', e); useRealGPS=false; }
+}
+function stopGPS(){
+  try{
+    if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+    useRealGPS=false;
+    console.log('GPS watch stopped');
+  }catch(e){ console.warn('GPS stop failed', e); }
+}
+
+/* =========================
+   7) 이벤트 바인딩
+========================= */
+toggleDrive.addEventListener('click', ()=> driving ? stopDriving() : startDriving());
+centerBtn.addEventListener('click', ()=> map.setView(simLatLng, map.getZoom()));
+rebuildBtn.addEventListener('click', ()=> buildGrid());
+gpsBtn.addEventListener('click', ()=>{
+  if(useRealGPS){ stopGPS(); gpsBtn.textContent='실제 GPS 사용(허용 필요)'; }
+  else { startGPS(); gpsBtn.textContent='GPS 중지'; }
+});
+useCache.addEventListener('change', ()=> { if(!useCache.checked) { localStorage.removeItem('car_tiles_state_v1'); console.log('cache cleared'); }});
+
+/* 지도 클릭 → 해당 타일 수동 해제 */
+map.on('click', (ev)=>{
+  const found = tiles.find(t => t.poly && t.poly.getBounds().contains(ev.latlng));
+  if(found) exploreTile(found.id, 'manual-click');
+});
+/* moveend 디바운스로 격자 재생성 */
+let rebuildTO = null;
+map.on('moveend', ()=>{
+  console.log('map moveend');
+  if(rebuildTO) clearTimeout(rebuildTO);
+  rebuildTO = setTimeout(()=> { buildGrid(); }, 600);
+});
+
+/* =========================
+   8) 초기 구동
+========================= */
+buildGrid();
+setTimeout(()=>{ try{ map.invalidateSize(); console.log('invalidate after first build'); }catch(e){} }, 250);
+console.log('Debug+Driving demo ready. If tiles fail to load via file://, serve via http (e.g., python -m http.server)');
+  </script>
+</body>
+</html>
