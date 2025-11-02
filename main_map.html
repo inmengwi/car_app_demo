@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>차량용 땅따먹기 - 지도 오버레이 데모 (Responsive)</title>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+ integrity="sha256-sA+e2hZgq3h3u3b5k0K+v/2g8m3Zr3j4lX0hWZr3qPk=" crossorigin=""/>
+
+<style>
+  :root{
+    --accent:#1f6feb;
+    --muted:#6b7280;
+    --card:#ffffff;
+    font-family: Inter, "Noto Sans KR", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial;
+  }
+  html,body{height:100%;margin:0;background:#f6f8fb;color:#0f172a;-webkit-font-smoothing:antialiased;}
+  .shell{max-width:1280px;margin:8px auto;background:var(--card);border-radius:12px;padding:12px;box-shadow:0 8px 30px rgba(10,20,40,0.06);box-sizing:border-box;}
+  header{display:flex;align-items:center;gap:12px;padding:4px 8px 12px 8px}
+  header h1{font-size:18px;margin:0}
+  .layout{display:flex;gap:12px}
+  .sidebar{width:320px;min-width:220px;padding:8px;box-sizing:border-box}
+  .map-area{flex:1; height:72vh; min-height:360px; position:relative}
+  #map{height:100%; width:100%; border-radius:10px; border:1px solid rgba(10,20,40,0.04); box-sizing:border-box}
+  .panel{background:var(--card); padding:10px; border-radius:8px; box-shadow:0 2px 8px rgba(10,20,40,0.03); margin-bottom:10px; border:1px solid rgba(10,20,40,0.03)}
+  .small{font-size:13px;color:var(--muted)}
+  .btn{display:inline-block;padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;margin-top:8px}
+  .muted{color:var(--muted)}
+  .stats-row{display:flex;gap:8px;flex-wrap:wrap}
+  .stat-b{background:#f3f8ff;padding:8px;border-radius:8px;font-weight:700;color:#06325b}
+
+  /* responsive adjustments */
+  @media (max-width:900px){
+    .layout{flex-direction:column}
+    .sidebar{order:2;width:100%}
+    .map-area{order:1;height:62vh}
+  }
+  @media (max-width:420px){
+    header h1{font-size:15px}
+    .sidebar{padding:6px}
+    .btn{padding:7px 8px;font-size:13px}
+    .map-area{height:58vh; min-height:300px}
+  }
+</style>
+</head>
+<body>
+  <div class="shell" role="application" aria-label="Map Overlay Demo">
+    <header>
+      <div style="width:40px;height:40px;border-radius:8px;background:linear-gradient(180deg,var(--accent),#0b6bd6)"></div>
+      <h1>차량용 땅따먹기 — 지도 오버레이 데모 (Responsive)</h1>
+      <div style="margin-left:auto" class="muted">Leaflet + OSM • Canvas 렌더러</div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar" aria-hidden="false">
+        <div class="panel">
+          <div class="small">시뮬레이션 속도 (km/h)</div>
+          <input id="speedRange" type="range" min="0" max="130" value="40" />
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <div>속도: <strong id="speedVal">40</strong> km/h</div>
+            <button id="toggleDrive" class="btn">Start Driving</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="small">자동 해제 반경 (m)</div>
+          <input id="radius" type="number" value="80" style="width:100%;padding:6px;border-radius:6px;border:1px solid #eee;margin-top:6px" />
+          <div style="margin-top:10px" class="small">타일 크기 (m) — (기본: 120m)</div>
+          <input id="tileSize" type="number" value="120" style="width:100%;padding:6px;border-radius:6px;border:1px solid #eee;margin-top:6px" />
+          <div style="margin-top:10px" class="small">오프라인 캐시</div>
+          <label><input id="useCache" type="checkbox" checked /> LocalStorage에 저장</label>
+        </div>
+
+        <div class="panel">
+          <div class="small">컨트롤</div>
+          <button id="centerBtn" class="btn" style="background:#0b6bd6">현재 위치로 중심</button>
+          <button id="rebuildBtn" class="btn" style="background:#0b6bd6;margin-left:6px">격자 재생성</button>
+          <div style="margin-top:8px" class="small">맵 이동 후 자동 재생성(디바운스 적용)</div>
+        </div>
+
+        <div class="panel">
+          <div class="small">통계</div>
+          <div class="stats-row" style="margin-top:8px;">
+            <div class="stat-b">총 타일 <div id="totalTiles" style="font-size:16px">0</div></div>
+            <div class="stat-b">해제 타일 <div id="exploredTiles" style="font-size:16px">0</div></div>
+            <div class="stat-b">점유율 <div id="percent" style="font-size:16px">0%</div></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="map-area">
+        <div id="map" aria-label="Interactive map"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+   integrity="sha256-o9N1j7w9u2g2mN1g+R9KQq3zJxG6g9oZr3+6m+Xv9xA=" crossorigin=""></script>
+
+<script>
+/*
+  Responsive demo improvements summary:
+  - responsive CSS (no fixed width)
+  - #map uses vh-based height; map.invalidateSize() after creation and on resize/orientationchange
+  - canvas renderer for tiles (lighter on mobile)
+  - limit max tile count to avoid mobile slowdown
+  - tileSize default increased to 120m for mobile
+*/
+
+const DEFAULT_CENTER = [37.5665, 126.9780]; // Seoul
+let map = L.map('map', {preferCanvas:true}).setView(DEFAULT_CENTER, 13);
+
+// OSM tiles
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+// State
+let tiles = []; // {id, poly, center, explored}
+let tileLayerGroup = L.layerGroup().addTo(map);
+let driving = false;
+let simLatLng = L.latLng(DEFAULT_CENTER);
+let autoInterval = null;
+
+// DOM
+const speedRange = document.getElementById('speedRange');
+const speedVal = document.getElementById('speedVal');
+const toggleDrive = document.getElementById('toggleDrive');
+const radiusInput = document.getElementById('radius');
+const tileSizeInput = document.getElementById('tileSize');
+const useCache = document.getElementById('useCache');
+const centerBtn = document.getElementById('centerBtn');
+const rebuildBtn = document.getElementById('rebuildBtn');
+const totalTilesEl = document.getElementById('totalTiles');
+const exploredTilesEl = document.getElementById('exploredTiles');
+const percentEl = document.getElementById('percent');
+
+speedVal.textContent = speedRange.value;
+speedRange.addEventListener('input', ()=> speedVal.textContent = speedRange.value);
+
+// Utility: meters -> lat/lng deltas
+function metersToLatLngDelta(meters, atLat){
+  const latDelta = meters / 111320;
+  const lngDelta = meters / (111320 * Math.cos(atLat * Math.PI/180));
+  return {latDelta, lngDelta};
+}
+
+// Use Canvas renderer for better mobile performance
+const canvasRenderer = L.canvas({ padding: 0.5 });
+
+function buildGrid(){
+  tileLayerGroup.clearLayers();
+  tiles = [];
+
+  const tileSize = Math.max(40, Number(tileSizeInput.value) || 120); // minimum guard
+  const bounds = map.getBounds();
+  const north = bounds.getNorth();
+  const south = bounds.getSouth();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+
+  const centerLat = map.getCenter().lat;
+  const d = metersToLatLngDelta(tileSize, centerLat);
+
+  // Avoid creating enormous numbers of tiles on mobile/zoomed-out views
+  // Compute approximate counts and cap them
+  const approxCols = Math.ceil((east - west) / d.lngDelta);
+  const approxRows = Math.ceil((north - south) / d.latDelta);
+  const approxCount = approxCols * approxRows;
+  const MAX_TILES = 240; // safety cap
+  const capFactor = approxCount > MAX_TILES ? Math.sqrt(approxCount / MAX_TILES) : 1;
+
+  let row = 0;
+  for (let lat = south; lat < north; lat += d.latDelta * capFactor){
+    let col = 0;
+    for (let lng = west; lng < east; lng += d.lngDelta * capFactor){
+      const lat1 = lat;
+      const lng1 = lng;
+      const lat2 = lat + d.latDelta * capFactor;
+      const lng2 = lng + d.lngDelta * capFactor;
+      const corners = [[lat1,lng1],[lat1,lng2],[lat2,lng2],[lat2,lng1]];
+      const center = L.latLng((lat1+lat2)/2, (lng1+lng2)/2);
+      const id = `r${row}c${col}`;
+      const rect = L.polygon(corners, {
+        renderer: canvasRenderer,
+        color: '#1f6feb',
+        weight: 0.6,
+        fillColor: '#ffffff',
+        fillOpacity: 0.35,
+        interactive: true
+      }).addTo(tileLayerGroup);
+
+      rect.on('click', ()=> exploreTile(id, 'manual'));
+
+      tiles.push({id, poly:rect, explored:false, center});
+      col++;
+      // safety: do not exceed absolute tile count
+      if(tiles.length > MAX_TILES) break;
+    }
+    row++;
+    if(tiles.length > MAX_TILES) break;
+  }
+
+  totalTilesEl.textContent = tiles.length;
+  updateStats();
+  loadState();
+  // Ensure map reflow after drawing
+  setTimeout(()=> { try{ map.invalidateSize(); }catch(e){} }, 220);
+}
+
+function exploreTile(id, why='auto'){
+  const t = tiles.find(x=>x.id===id);
+  if(!t || t.explored) return;
+  t.explored = true;
+  try{
+    t.poly.setStyle({fillColor:'#dff4ff', fillOpacity:0.95, color:'#0b6bd6', weight:0.8});
+  }catch(e){}
+  addHistory(`[${why}] 해제: ${t.id}`);
+  saveState();
+  updateStats();
+}
+
+function autoUncover(){
+  const radius = Number(radiusInput.value) || 80;
+  const candidates = tiles.filter(t=>!t.explored && t.center.distanceTo(simLatLng) <= radius);
+  if(candidates.length===0) return;
+  const toReveal = Math.min(2, Math.max(1, Math.floor(Math.random()*2)+1));
+  for(let i=0;i<toReveal;i++){
+    const idx = Math.floor(Math.random()*candidates.length);
+    exploreTile(candidates[idx].id, 'auto');
+  }
+}
+
+function updateStats(){
+  const total = tiles.length;
+  const explored = tiles.filter(t=>t.explored).length;
+  totalTilesEl.textContent = total;
+  exploredTilesEl.textContent = explored;
+  percentEl.textContent = total ? (Math.round((explored/total)*100) + '%') : '0%';
+}
+
+function addHistory(msg){ console.log(new Date().toLocaleTimeString() + ' — ' + msg); }
+
+function saveState(){
+  if(!useCache.checked) return;
+  try{
+    const state = tiles.map(t => ({id:t.id, explored:t.explored}));
+    localStorage.setItem('car_tiles_state_v1', JSON.stringify(state));
+  }catch(e){ console.warn('save failed', e); }
+}
+function loadState(){
+  if(!useCache.checked) return;
+  const raw = localStorage.getItem('car_tiles_state_v1');
+  if(!raw) return;
+  try{
+    const state = JSON.parse(raw);
+    state.forEach(s => {
+      const t = tiles.find(tt=>tt.id===s.id);
+      if(t && s.explored){
+        t.explored = true;
+        try{ t.poly.setStyle({fillColor:'#dff4ff', fillOpacity:0.95, color:'#0b6bd6', weight:0.8}); }catch(e){}
+      }
+    });
+    updateStats();
+  }catch(e){ console.warn('load state fail', e); }
+}
+
+// Driving simulation
+function startDriving(){
+  if(autoInterval) clearInterval(autoInterval);
+  driving = true;
+  toggleDrive.textContent = 'Stop Driving';
+  toggleDrive.style.background = '#d03030';
+
+  autoInterval = setInterval(()=>{
+    const speed = Number(speedRange.value) || 0;
+    const metersPerSec = speed * 1000 / 3600;
+    const tickSec = 1.2;
+    const moveMeters = metersPerSec * tickSec;
+    const bearing = Math.random()*360;
+    simLatLng = destinationPoint(simLatLng, moveMeters, bearing);
+    map.panTo(simLatLng, {animate:false});
+    const minSpeed = 5;
+    if(speed >= minSpeed) autoUncover();
+  }, 1200);
+}
+function stopDriving(){
+  driving = false;
+  toggleDrive.textContent = 'Start Driving';
+  toggleDrive.style.background = 'var(--accent)';
+  if(autoInterval) clearInterval(autoInterval);
+}
+
+// destination calculation
+function destinationPoint(latlng, distanceMeters, bearingDeg){
+  const R = 6378137;
+  const δ = distanceMeters / R;
+  const θ = bearingDeg * Math.PI/180;
+  const φ1 = latlng.lat * Math.PI/180;
+  const λ1 = latlng.lng * Math.PI/180;
+
+  const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+  const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
+  const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
+  const φ2 = Math.asin(sinφ2);
+  const y = Math.sin(θ) * sinδ * cosφ1;
+  const x = cosδ - sinφ1 * sinφ2;
+  const λ2 = λ1 + Math.atan2(y, x);
+
+  return L.latLng(φ2 * 180/Math.PI, λ2 * 180/Math.PI);
+}
+
+/* Event bindings */
+toggleDrive.addEventListener('click', ()=> { if(!driving) startDriving(); else stopDriving(); });
+centerBtn.addEventListener('click', ()=> map.setView(simLatLng, map.getZoom()));
+rebuildBtn.addEventListener('click', ()=> buildGrid());
+map.on('click', (ev)=> {
+  // find tile containing clicked point (approx via bounds)
+  const found = tiles.find(t => t.poly && t.poly.getBounds().contains(ev.latlng));
+  if(found) exploreTile(found.id, 'manual-click');
+});
+
+/* Debounced rebuild on moveend */
+let rebuildTO = null;
+map.on('moveend', ()=> {
+  if(rebuildTO) clearTimeout(rebuildTO);
+  rebuildTO = setTimeout(()=> { buildGrid(); }, 600);
+});
+
+/* Initial build */
+buildGrid();
+
+/* Ensure map renders properly on mobile/after layout changes */
+setTimeout(()=> { try{ map.invalidateSize(); }catch(e){} }, 300);
+window.addEventListener('resize', ()=> { setTimeout(()=> map.invalidateSize(), 200); });
+window.addEventListener('orientationchange', ()=> { setTimeout(()=> map.invalidateSize(), 350); });
+
+// Remove stored state when caching toggled off
+useCache.addEventListener('change', ()=> { if(!useCache.checked) localStorage.removeItem('car_tiles_state_v1'); });
+
+// Safety: if user tries to load with file:// and tiles not showing, recommend local server
+console.log('Responsive demo loaded. If map tiles do not appear on mobile when opened via file://, run a local http server (e.g. python -m http.server) to avoid resource loading restrictions.');
+
+</script>
+</body>
+</html>
