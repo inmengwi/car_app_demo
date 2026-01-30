@@ -254,6 +254,17 @@ function exploreTile(id, why='auto'){
 
 function autoUncover(){
   const radius = Number(radiusInput.value) || 90;
+
+  // simLatLng이 현재 타일 영역 안에 있는지 확인
+  if(tiles.length > 0){
+    const anyTileContains = tiles.some(t => t.poly.getBounds().contains(simLatLng));
+    const anyWithinRadius = tiles.some(t => t.center.distanceTo(simLatLng) <= radius * 2);
+    if(!anyTileContains && !anyWithinRadius){
+      console.log('autoUncover(): simLatLng outside tile area, rebuilding grid');
+      buildGrid();
+    }
+  }
+
   // 현재 위치가 타일 안에 있거나, center가 반경 내에 있으면 후보로 선택
   const candidates = tiles.filter(t=>!t.explored && (
     t.poly.getBounds().contains(simLatLng) || t.center.distanceTo(simLatLng) <= radius
