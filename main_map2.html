@@ -254,7 +254,10 @@ function exploreTile(id, why='auto'){
 
 function autoUncover(){
   const radius = Number(radiusInput.value) || 90;
-  const candidates = tiles.filter(t=>!t.explored && t.center.distanceTo(simLatLng) <= radius);
+  // 현재 위치가 타일 안에 있거나, center가 반경 내에 있으면 후보로 선택
+  const candidates = tiles.filter(t=>!t.explored && (
+    t.poly.getBounds().contains(simLatLng) || t.center.distanceTo(simLatLng) <= radius
+  ));
   if(candidates.length===0){ console.log('autoUncover(): no candidates'); return; }
   const toReveal = Math.min(2, Math.max(1, Math.floor(Math.random()*2)+1));
   for(let i=0;i<toReveal;i++){
