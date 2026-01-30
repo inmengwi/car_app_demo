@@ -200,8 +200,10 @@ function buildGrid(){
         renderer:canvasRenderer, color:'#1f6feb', weight:.6, fillColor:'#ffffff', fillOpacity:.32, interactive:true
       }).addTo(tileLayerGroup);
       const id=`r${row}c${col}`, center=L.latLng((lat+lat2)/2,(lng+lng2)/2);
+      // bounds를 직접 저장 (poly.getBounds()가 렌더링 전에 동작하지 않을 수 있음)
+      const bounds=L.latLngBounds([[lat,lng],[lat2,lng2]]);
       rect.on('click', ()=> exploreTile(id,'manual-click'));
-      tiles.push({id, poly:rect, explored:false, center});
+      tiles.push({id, poly:rect, explored:false, center, bounds});
       col++; if(tiles.length>MAX_TILES) break;
     }
     row++; if(tiles.length>MAX_TILES) break;
@@ -220,9 +222,9 @@ function exploreTile(id, why='auto'){
 function autoUncover(){
   const radius=Number(radiusInput.value)||90;
 
-  // simLatLng이 현재 타일 영역 안에 있는지 확인
+  // simLatLng이 현재 타일 영역 안에 있는지 확인 (저장된 bounds 사용)
   if(tiles.length > 0){
-    const anyTileContains = tiles.some(t => t.poly.getBounds().contains(simLatLng));
+    const anyTileContains = tiles.some(t => t.bounds.contains(simLatLng));
     const anyWithinRadius = tiles.some(t => t.center.distanceTo(simLatLng) <= radius * 2);
     if(!anyTileContains && !anyWithinRadius){
       console.log('autoUncover(): simLatLng outside tile area, rebuilding grid');
@@ -230,9 +232,9 @@ function autoUncover(){
     }
   }
 
-  // 현재 위치가 타일 안에 있거나, center가 반경 내에 있으면 후보로 선택
+  // 현재 위치가 타일 안에 있거나, center가 반경 내에 있으면 후보로 선택 (저장된 bounds 사용)
   const cands=tiles.filter(t=>!t.explored && (
-    t.poly.getBounds().contains(simLatLng) || t.center.distanceTo(simLatLng)<=radius
+    t.bounds.contains(simLatLng) || t.center.distanceTo(simLatLng)<=radius
   ));
   if(!cands.length){ console.log('autoUncover(): no candidates within radius'); return; }
   const k=Math.min(2, Math.max(1, Math.floor(Math.random()*2)+1));
